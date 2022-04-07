@@ -81,12 +81,12 @@ def main():
 
     torch.manual_seed(h.seed)
     global device
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(h.seed)
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
-
+   # if torch.cuda.is_available():
+   #     torch.cuda.manual_seed(h.seed)
+   #     device = torch.device('cuda')
+   # else:
+   #     device = torch.device('cpu')
+    device = "cpu"
     inference(a)
 
 

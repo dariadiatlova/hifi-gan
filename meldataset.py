@@ -4,16 +4,19 @@ import random
 import torch
 import torch.utils.data
 import numpy as np
+import pandas as pd
+import librosa
+import re
 from librosa.util import normalize
-from scipy.io.wavfile import read
 from librosa.filters import mel as librosa_mel_fn
 
 MAX_WAV_VALUE = 32768.0
 
 
 def load_wav(full_path):
-    sampling_rate, data = read(full_path)
-    return data, sampling_rate
+    data, sampling_rate = librosa.load(full_path, sr=48000)
+    data = librosa.resample(data, 48000, 22050)
+    return data, 22050
 
 
 def dynamic_range_compression(x, C=1, clip_val=1e-5):
@@ -72,15 +75,15 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
     return spec
 
 
-def get_dataset_filelist(a):
-    with open(a.input_training_file, 'r', encoding='utf-8') as fi:
-        training_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
-                          for x in fi.read().split('\n') if len(x) > 0]
-
-    with open(a.input_validation_file, 'r', encoding='utf-8') as fi:
-        validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
-                            for x in fi.read().split('\n') if len(x) > 0]
-    return training_files, validation_files
+def get_dataset_filelist(tsv_filepath, root_path):
+    df = pd.read_csv(tsv_filepath, sep='\t')
+    mp3_filenames = np.array(df.path)
+    pattern = re.compile(".*(?=.mp3)")
+    wav_filenames = []
+    for filename in mp3_filenames:
+        if pattern.search(filename) is not None:
+            wav_filenames.append(root_path + pattern.search(filename).group() + ".wav")
+    return np.array(wav_filenames)
 
 
 class MelDataset(torch.utils.data.Dataset):

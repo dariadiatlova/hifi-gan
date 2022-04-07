@@ -1,5 +1,6 @@
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+import wandb
 import itertools
 import os
 import time
@@ -22,6 +23,10 @@ torch.backends.cudnn.benchmark = True
 
 
 def train(rank, a, h):
+    wandb.init(project=h.project_name,
+               config=h,
+               mode=h.mode)
+
     if h.num_gpus > 1:
         init_process_group(backend=h.dist_config['dist_backend'], init_method=h.dist_config['dist_url'],
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
@@ -71,7 +76,8 @@ def train(rank, a, h):
     scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
     scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=h.lr_decay, last_epoch=last_epoch)
 
-    training_filelist, validation_filelist = get_dataset_filelist(a)
+    training_filelist = get_dataset_filelist(a.input_validation_file, a.input_wavs_dir)
+    validation_filelist = get_dataset_filelist(a.input_validation_file, a.input_wavs_dir)
 
     trainset = MelDataset(training_filelist, h.segment_size, h.n_fft, h.num_mels,
                           h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, n_cache_reuse=0,
@@ -155,11 +161,21 @@ def train(rank, a, h):
             loss_gen_all.backward()
             optim_g.step()
 
+
             if rank == 0:
                 # STDOUT logging
                 if steps % a.stdout_interval == 0:
                     with torch.no_grad():
                         mel_error = F.l1_loss(y_mel, y_g_hat_mel).item()
+
+                        wandb.log({"train/total_gen_loss": loss_gen_all,
+                                   "train/generator_fm_loss": loss_fm_s + loss_fm_f,
+                                   "train/generator_mel_loss": loss_mel,
+                                   "train/generator_fd_loss": loss_gen_f,
+                                   "train/generator_sd_loss": loss_gen_s,
+                                   "train/s_discriminator_loss": loss_disc_s,
+                                   "train/f_discriminator_loss": loss_disc_f,
+                                   "train/mel_error": mel_error})
 
                     print('Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.
                           format(steps, loss_gen_all, mel_error, time.time() - start_b))
@@ -213,6 +229,8 @@ def train(rank, a, h):
                         val_err = val_err_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
 
+                        wandb.log({"val/mel_error": y_g_hat_mel})
+
                     generator.train()
 
             steps += 1
@@ -230,17 +248,17 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--input_wavs_dir', default='LJSpeech-1.1/wavs')
+    parser.add_argument('--input_wavs_dir', default='../Fre-GAN/data/audio/')
     parser.add_argument('--input_mels_dir', default='ft_dataset')
-    parser.add_argument('--input_training_file', default='LJSpeech-1.1/training.txt')
-    parser.add_argument('--input_validation_file', default='LJSpeech-1.1/validation.txt')
+    parser.add_argument('--input_training_file', default='../Fre-GAN/data/train.tsv')
+    parser.add_argument('--input_validation_file', default='../Fre-GAN/data/test.tsv')
     parser.add_argument('--checkpoint_path', default='cp_hifigan')
-    parser.add_argument('--config', default='')
-    parser.add_argument('--training_epochs', default=3100, type=int)
+    parser.add_argument('--config', default='cv_config.json')
+    parser.add_argument('--training_epochs', default=20, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
-    parser.add_argument('--checkpoint_interval', default=5000, type=int)
+    parser.add_argument('--checkpoint_interval', default=20, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
-    parser.add_argument('--validation_interval', default=1000, type=int)
+    parser.add_argument('--validation_interval', default=20, type=int)
     parser.add_argument('--fine_tuning', default=False, type=bool)
 
     a = parser.parse_args()
